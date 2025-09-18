@@ -1,28 +1,61 @@
 const logger = require('../utils/logger');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * Error handling middleware
  */
 const errorHandler = (err, req, res, next) => {
+  // Default to 500 server error
+  let statusCode = err.statusCode || err.status || 500;
+  let errorCode = err.code || 'INTERNAL_ERROR';
+  let message = err.message || 'An unexpected error occurred';
+  
+  // Handle specific error types
+  if (err.name === 'ValidationError') {
+    statusCode = 400;
+    errorCode = 'VALIDATION_ERROR';
+    message = 'Validation failed';
+  } else if (err.name === 'CastError') {
+    statusCode = 400;
+    errorCode = 'INVALID_ID';
+    message = 'Invalid ID format';
+  } else if (err.name === 'MongoServerError' && err.code === 11000) {
+    statusCode = 409;
+    errorCode = 'DUPLICATE_KEY';
+    message = 'Duplicate entry found';
+  } else if (err.name === 'UnauthorizedError') {
+    statusCode = 401;
+    errorCode = 'UNAUTHORIZED';
+    message = 'Authentication required';
+  }
+  
   // Log error
-  logger.error('Error occurred:', {
+  const errorId = uuidv4();
+  logger.error('Request error:', {
+    errorId,
     error: err.message,
     stack: err.stack,
-    url: req.url,
+    statusCode,
+    errorCode,
+    url: req.originalUrl,
     method: req.method,
     ip: req.ip,
-    tenantId: req.params.tenantId || req.query.tenantId
+    tenantId: req.tenantId,
+    userId: req.user?.userId,
+    requestId: req.requestId
   });
   
-  // Determine status code
-  const statusCode = err.statusCode || err.status || 500;
-  
-  // Prepare error response
+  // Prepare error response in standard format
   const errorResponse = {
+    success: false,
     error: {
-      message: err.message || 'Internal Server Error',
-      status: statusCode,
-      timestamp: new Date().toISOString()
+      code: errorCode,
+      message: message,
+      errorId: errorId
+    },
+    meta: {
+      timestamp: new Date().toISOString(),
+      requestId: req.requestId || uuidv4()
     }
   };
   
@@ -30,6 +63,11 @@ const errorHandler = (err, req, res, next) => {
   if (process.env.NODE_ENV === 'development') {
     errorResponse.error.stack = err.stack;
     errorResponse.error.details = err;
+  }
+  
+  // Add validation errors if present
+  if (err.errors) {
+    errorResponse.error.validationErrors = err.errors;
   }
   
   // Send error response
@@ -40,9 +78,17 @@ const errorHandler = (err, req, res, next) => {
  * 404 Not Found handler
  */
 const notFoundHandler = (req, res, next) => {
-  const error = new Error(`Not Found - ${req.originalUrl}`);
-  error.statusCode = 404;
-  next(error);
+  res.status(404).json({
+    success: false,
+    error: {
+      code: 'NOT_FOUND',
+      message: `Resource not found: ${req.originalUrl}`
+    },
+    meta: {
+      timestamp: new Date().toISOString(),
+      requestId: req.requestId || uuidv4()
+    }
+  });
 };
 
 /**
