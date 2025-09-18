@@ -6,9 +6,14 @@ const config = require('./config/app');
 const logger = require('./utils/logger');
 const requestLogger = require('./middleware/requestLogger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
-const modelRegistryRoutes = require('./routes/modelRegistry');
-const modelRegistry = require('./services/DistributedModelRegistry');
-const schemas = require('./models');
+const { attachTenantConnection } = require('./middleware/tenant');
+const masterDataCache = require('./services/MasterDataCache');
+
+// Import routes
+const authRoutes = require('./routes/auth');
+const masterRoutes = require('./routes/masters');
+const projectRoutes = require('./routes/projects');
+const inputRoutes = require('./routes/inputs');
 
 // Create Express app
 const app = express();
@@ -70,21 +75,61 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/models', modelRegistryRoutes);
+
+// Auth routes (no tenant required)
+app.use('/api/v1/auth', authRoutes);
+
+// Protected routes that require tenant connection
+app.use('/api/v1/masters', attachTenantConnection, masterRoutes);
+app.use('/api/v1/projects', attachTenantConnection, projectRoutes);
+app.use('/api/v1/inputs', attachTenantConnection, inputRoutes);
+
+// Admin routes
+app.get('/api/v1/admin/connections', require('./middleware/auth').authenticate, require('./middleware/auth').authorize(['admin']), require('./middleware/tenant').getConnectionStats);
+app.delete('/api/v1/admin/connections/:tenantId', require('./middleware/auth').authenticate, require('./middleware/auth').authorize(['admin']), require('./middleware/tenant').closeTenantConnection);
+app.post('/api/v1/admin/connections/cleanup', require('./middleware/auth').authenticate, require('./middleware/auth').authorize(['admin']), require('./middleware/tenant').closeInactiveConnections);
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
-    name: 'Distributed Model Registry',
-    version: '1.0.0',
+    name: 'Financial Reporting Platform API',
+    version: '1.1.0',
     status: 'running',
     endpoints: {
       health: '/health',
       api: {
-        models: '/api/models/:tenantId',
-        stats: '/api/models/stats',
-        schemas: '/api/models/schemas',
-        cache: '/api/models/cache/:tenantId'
+        auth: {
+          login: 'POST /api/v1/auth/login',
+          refresh: 'POST /api/v1/auth/refresh'
+        },
+        masters: {
+          collections: 'GET /api/v1/masters/collections',
+          list: 'GET /api/v1/masters/:collection',
+          get: 'GET /api/v1/masters/:collection/:id',
+          create: 'POST /api/v1/masters/:collection',
+          update: 'PUT /api/v1/masters/:collection/:id',
+          delete: 'DELETE /api/v1/masters/:collection/:id'
+        },
+        projects: {
+          list: 'GET /api/v1/projects',
+          create: 'POST /api/v1/projects',
+          get: 'GET /api/v1/projects/:projectId',
+          update: 'PUT /api/v1/projects/:projectId',
+          stats: 'GET /api/v1/projects/:projectId/stats',
+          createVersion: 'POST /api/v1/projects/:projectId/versions',
+          updateVersion: 'PATCH /api/v1/projects/:projectId/versions/:versionId/status'
+        },
+        inputs: {
+          equipment: {
+            list: 'GET /api/v1/inputs/equipmentCost',
+            get: 'GET /api/v1/inputs/equipmentCost/:recordId',
+            create: 'POST /api/v1/inputs/equipmentCost',
+            bulk: 'POST /api/v1/inputs/equipmentCost/bulk',
+            update: 'PUT /api/v1/inputs/equipmentCost/:recordId',
+            delete: 'DELETE /api/v1/inputs/equipmentCost/:recordId',
+            status: 'POST /api/v1/inputs/equipmentCost/status'
+          }
+        }
       }
     }
   });
@@ -96,22 +141,24 @@ app.use(notFoundHandler);
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-// Initialize model registry with schemas
-const initializeRegistry = async () => {
+// Initialize application
+const initializeApp = async () => {
   try {
-    logger.info('Initializing model registry...');
+    logger.info('Initializing Financial Reporting Platform...');
     
-    // Register all schemas
-    modelRegistry.registerSchemas(schemas);
+    // Initialize master data cache
+    logger.info('Master data cache initialized');
     
-    logger.info(`Model registry initialized with ${Object.keys(schemas).length} schemas`);
+    // Log available collections
+    const { masterCollections } = require('./models');
+    logger.info(`Available master collections: ${masterCollections.length}`, {
+      collections: masterCollections
+    });
     
-    // Perform initial health check
-    const health = await modelRegistry.healthCheck();
-    logger.info('Initial health check:', health);
+    logger.info('Application initialized successfully');
     
   } catch (error) {
-    logger.error('Failed to initialize model registry:', error);
+    logger.error('Failed to initialize application:', error);
     throw error;
   }
 };
@@ -128,8 +175,12 @@ const gracefulShutdown = async (signal) => {
       });
     }
     
-    // Shutdown registry (closes connections and cache)
-    await modelRegistry.shutdown();
+    // Close all tenant connections
+    const { connectionManager } = require('./middleware/tenant');
+    await connectionManager.closeAll();
+    
+    // Close Redis connections
+    await masterDataCache.close();
     
     logger.info('Graceful shutdown complete');
     process.exit(0);
@@ -155,4 +206,4 @@ process.on('unhandledRejection', (reason, promise) => {
   gracefulShutdown('unhandledRejection');
 });
 
-module.exports = { app, initializeRegistry };
+module.exports = { app, initializeApp };

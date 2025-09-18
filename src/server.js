@@ -1,4 +1,4 @@
-const { app, initializeRegistry } = require('./app');
+const { app, initializeApp } = require('./app');
 const config = require('./config/app');
 const logger = require('./utils/logger');
 
@@ -9,8 +9,8 @@ const PORT = config.port;
  */
 const startServer = async () => {
   try {
-    // Initialize the model registry
-    await initializeRegistry();
+    // Initialize the application
+    await initializeApp();
     
     // Start the server
     global.server = app.listen(PORT, '0.0.0.0', () => {
@@ -24,7 +24,7 @@ const startServer = async () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
-║        Distributed Model Registry Server Started            ║
+║        Financial Reporting Platform API Started              ║
 ║                                                              ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Port:        ${PORT.toString().padEnd(45)} ║
@@ -32,15 +32,17 @@ const startServer = async () => {
 ║  PID:         ${process.pid.toString().padEnd(45)} ║
 ║  Node:        ${process.version.padEnd(45)} ║
 ╠══════════════════════════════════════════════════════════════╣
-║  API Endpoints:                                              ║
-║  - GET  /health                                              ║
-║  - GET  /api/models/stats                                    ║
-║  - GET  /api/models/schemas                                  ║
-║  - GET  /api/models/:tenantId                                ║
-║  - GET  /api/models/:tenantId/:modelName                     ║
-║  - POST /api/models/:tenantId/test                           ║
-║  - DEL  /api/models/cache/:tenantId                          ║
-║  - DEL  /api/models/connection/:tenantId                     ║
+║  API Version: v1                                             ║
+║  Base URL:    http://localhost:${PORT}/api/v1                     ║
+║                                                              ║
+║  Key Endpoints:                                              ║
+║  - POST /api/v1/auth/login                                   ║
+║  - GET  /api/v1/masters/:collection                          ║
+║  - POST /api/v1/projects                                     ║
+║  - POST /api/v1/inputs/equipmentCost                         ║
+║                                                              ║
+║  Documentation: /                                             ║
+║  Health Check:  /health                                       ║
 ╚══════════════════════════════════════════════════════════════╝
       `);
     });
