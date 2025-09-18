@@ -1,0 +1,234 @@
+---
+description: You are developing a Financial Reporting Platform backend using Express.js, MongoDB, and Redis. This is an enterprise-grade application with strict requirements for data integrity, audit compliance, and performance.
+alwaysApply: false
+---
+
+### Technology Stack
+
+- _Runtime_: Node.js 18+
+- _Framework_: Express.js with middleware pattern
+- _Database_: MongoDB with Mongoose ODM
+- _Cache_: Redis for session management and caching
+- _Queue_: Bull Queue with Redis backend
+- _Validation_: Zod for runtime type checking
+- _Authentication_: JWT with refresh token rotation
+
+### Project Structure
+
+src/
+├── config/ # Environment and database configurations
+├── controllers/ # Request handlers and response formatting
+├── services/ # Business logic layer
+├── models/ # Mongoose schemas and TypeScript interfaces
+├── middleware/ # Express middleware (auth, validation, logging)
+├── utils/ # Helper functions and utilities
+├── validators/ # Zod schemas for request validation
+├── queues/ # Bull queue job definitions
+└── routes/ # Express route definitions
+
+## Development Standards
+
+### Code Quality Rules
+
+3. _ESLint compliance_ - Fix all linting errors before committing
+4. _Consistent naming_:
+   - camelCase for variables and functions
+   - PascalCase for classes and interfaces
+   - UPPER_SNAKE_CASE for constants
+   - kebab-case for file names
+
+### Error Handling
+
+// Centralized error handling middleware
+app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
+// Log error with correlation ID
+// Return standardized error response
+});
+
+### API Response Format
+
+typescript
+interface ApiResponse<T> {
+success: boolean;
+data?: T;
+error?: {
+code: string;
+message: string;
+details?: any;
+};
+meta?: {
+pagination?: PaginationInfo;
+timestamp: string;
+requestId: string;
+};
+}
+
+## Database Rules
+
+### Database Performance Rules
+
+1. _Always create indexes_ for frequently queried fields
+2. _Use compound indexes_ for multi-field queries
+3. _Implement pagination_ with cursor-based approach for large datasets
+4. _Use aggregation pipelines_ efficiently with proper $match stages early
+
+## Security Requirements
+
+### Authentication & Authorization
+
+1. _JWT Implementation_:
+
+   - Access tokens: 15 minutes expiry
+   - Refresh tokens: 7 days expiry with rotation
+   - Use RS256 algorithm with proper key management
+
+2. _Role-Based Access Control_:
+   typescript
+   enum UserRole {
+   ADMIN = 'admin',
+   ACCOUNTANT = 'accountant',
+   ANALYST = 'analyst',
+   VIEWER = 'viewer'
+   }
+
+enum Permission {
+CREATE_MASTER = 'create:master',
+UPDATE_MASTER = 'update:master',
+APPROVE_INPUT = 'approve:input',
+GENERATE_REPORT = 'generate:report'
+}
+
+3. _Input Validation_:
+   - Use Zod for all request validation
+   - Sanitize all inputs to prevent XSS
+   - Validate all MongoDB ObjectIds
+
+### Audit Compliance //Audit Collection
+
+typescript
+// Every CUD operation must create audit log
+interface AuditLog {
+userId: ObjectId;
+action: 'CREATE' | 'UPDATE' | 'DELETE' | 'APPROVE' | 'REJECT';
+resource: string;
+resourceId: string;
+before?: any;
+after?: any;
+timestamp: Date;
+ipAddress: string;
+userAgent: string;
+}
+
+## Performance Rules
+
+### Caching Strategy
+
+1. _Master data caching_:
+
+   - Redis TTL: 1 hour
+   - Cache key format: master:{collection}:{optionId}
+   - Invalidate on master data updates
+
+2. _Session caching_:
+
+   - Store user sessions in Redis
+   - Include user permissions for RBAC
+
+3. _Report caching_:
+   - Cache frequently requested reports for 30 minutes
+   - Use report parameters as cache key
+
+### Queue Management
+
+1. _Async operations_ for:
+
+   - Report generation
+   - Bulk data operations
+   - Email notifications
+   - Audit log processing
+
+2. _Queue configuration_:
+   typescript
+   const reportQueue = new Queue('report generation', {
+   redis: redisConfig,
+   defaultJobOptions: {
+   removeOnComplete: 10,
+   removeOnFail: 5,
+   attempts: 3,
+   backoff: 'exponential'
+   }
+   });
+
+## API Design Rules
+
+### RESTful Conventions
+
+1. _URL patterns_:
+
+   - /api/v1/masters/{collection} - Master data operations
+   - /api/v1/inputs/{collection} - Input data operations
+   - /api/v1/reports - Report operations
+
+2. _HTTP methods_:
+
+   - GET: Retrieve data
+   - POST: Create new resources
+   - PUT: Complete resource update
+   - PATCH: Partial resource update
+   - DELETE: Soft delete (set isActive: false)
+
+3. _Status codes_:
+   - 200: Success with data
+   - 201: Created successfully
+   - 204: Success without data
+   - 400: Bad request/validation error
+   - 401: Unauthorized
+   - 403: Forbidden
+   - 404: Not found
+   - 409: Conflict (duplicate data)
+   - 422: Unprocessable entity
+   - 500: Internal server error
+
+### Request Validation
+
+typescript
+// Use Zod schemas for validation
+const createMasterSchema = z.object({
+optionId: z.string().min(1).max(50),
+description: z.string().min(1).max(200),
+config: z.record(z.any()).optional()
+});
+
+// Apply validation middleware
+router.post('/masters/:collection',
+validateRequest(createMasterSchema),
+masterController.create
+);
+
+## Business Logic Rules
+
+### Master Data Management
+
+1. _Prevent deletion_ - Only allow soft delete via isActive flag
+2. _Unique optionId_ - Enforce uniqueness across each master collection
+3. _Referential integrity_ - Check references before deactivating master records
+
+### Input Data Processing
+
+1. _Real-time calculations_:
+
+   - Implement calculation engine with configurable rules
+   - Cache calculation results to avoid recomputation
+   - Validate calculations server-side even if computed on client
+
+2. _Approval workflow_:
+   - Draft → Pending → Approved/Rejected
+   - Only approved data appears in reports
+   - Maintain immutability of approved records
+
+### Reporting Engine
+
+1. _Data source validation_ - Only use approved input records
+2. _Async processing_ - Generate reports in background jobs
+3. _Export formats_ - Support JSON, CSV, PDF, Excel
+4. _Data lineage_ - Track source of all report data
