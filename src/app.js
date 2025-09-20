@@ -81,7 +81,7 @@ app.get("/health", (req, res) => {
 // API routes
 
 // Auth routes (no tenant required)
-app.use("/api/auth", authRoutes);
+app.use("/api/v1/auth", authRoutes);
 
 // Protected routes that require tenant connection
 app.use("/api/v1/masters", masterRoutes);

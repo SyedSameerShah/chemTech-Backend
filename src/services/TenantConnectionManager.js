@@ -54,7 +54,7 @@ class TenantConnectionManager {
    */
   async createConnection(tenantId) {
     try {
-      const dbName = `${dbConfig.tenant.dbPrefix}${tenantId}`;
+      const dbName = `${tenantId}`;
       // const uri = this.buildConnectionUri(tenantId);
       const uri = dbConfig.mongodb.uri + dbName;
 

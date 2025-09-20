@@ -1,5 +1,6 @@
 const logger = require("../utils/logger");
 const { createMasterModel } = require("../models/MasterData");
+const DistributedModelRegistry = require("../services/DistributedModelRegistry");
 const { masterCollections } = require("../models");
 const AuditLog = require("../models/AuditLog");
 const masterDataCache = require("../services/MasterDataCache");
@@ -36,13 +37,18 @@ const getAll = async (req, res) => {
     }
 
     // Get tenant connection
-    const tenantConnection = req.tenantConnection;
-    const MasterModel = createMasterModel(collectionName);
-    const Model = tenantConnection.model(
-      collectionName,
-      MasterModel.schema,
+    // const tenantConnection = req.tenantConnection;
+    const collectionModel = await DistributedModelRegistry.getModel(
+      req.tenantId,
       collectionName
     );
+    console.log("collectionModel", collectionModel);
+    // const MasterModel = createMasterModel(collectionName);
+    // const Model = tenantConnection.model(
+    //   collectionName,
+    //   MasterModel.schema,
+    //   collectionName
+    // );
 
     // Build query
     const query = {};
@@ -84,21 +90,21 @@ const getAll = async (req, res) => {
     const sort = { [sortBy]: sortOrder === "asc" ? 1 : -1 };
     const cacheKey = JSON.stringify({ query, sort, skip, limit });
 
-    if (Object.keys(query).length === 0 && !search) {
-      // Try to get from cache
-      const cachedData = await masterDataCache.get(
-        req.tenantId,
-        collectionName,
-        cacheKey
-      );
-      if (cachedData) {
-        logger.info("Found cached data for master data", {
-          cachedData,
-        });
-        items = cachedData.items;
-        total = cachedData.total;
-      }
-    }
+    // if (Object.keys(query).length === 0 && !search) {
+    //   // Try to get from cache
+    //   const cachedData = await masterDataCache.get(
+    //     req.tenantId,
+    //     collectionName,
+    //     cacheKey
+    //   );
+    //   if (cachedData) {
+    //     logger.info("Found cached data for master data", {
+    //       cachedData,
+    //     });
+    //     items = cachedData.items;
+    //     total = cachedData.total;
+    //   }
+    // }
 
     // If not in cache, query database
     if (!items) {
@@ -108,8 +114,8 @@ const getAll = async (req, res) => {
         limit,
       });
       [items, total] = await Promise.all([
-        Model.find(query).skip(skip).limit(limit).lean(),
-        Model.countDocuments(query),
+        collectionModel.find(query).skip(skip).limit(limit).lean(),
+        collectionModel.countDocuments(query),
       ]);
 
       // Cache the results if no filters
@@ -499,7 +505,7 @@ const getCollections = async (req, res) => {
         .split("_")
         .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
         .join(" "),
-      endpoint: `/api/v1/masters/${name}`,
+      // endpoint: `/api/v1/masters/${name}`,
     }));
 
     res.json({
