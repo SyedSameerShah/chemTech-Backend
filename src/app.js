@@ -85,8 +85,8 @@ app.use("/api/v1/auth", authRoutes);
 
 // Protected routes that require tenant connection
 app.use("/api/v1/masters", masterRoutes);
-app.use("/api/v1/projects", attachTenantConnection, projectRoutes);
-app.use("/api/v1/inputs", attachTenantConnection, inputRoutes);
+app.use("/api/v1/projects", projectRoutes);
+app.use("/api/v1/inputs", inputRoutes);
 
 // Admin routes
 app.get(

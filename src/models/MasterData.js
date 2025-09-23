@@ -204,6 +204,12 @@ const createMasterModel = (collectionName) => {
         processType: { type: String },
       });
       break;
+    case "currency_types":
+      schema.add({
+        currencyCode: { type: String, maxlength: 100 },
+        currencyName: { type: String, maxlength: 100 },
+      });
+      break;
   }
 
   return mongoose.model(modelName, schema, collectionName);

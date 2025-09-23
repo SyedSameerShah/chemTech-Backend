@@ -71,11 +71,11 @@ class DistributedModelRegistry {
 
     try {
       // Check cache first
-      const cachedModels = await this.getCachedModels(tenantId);
-      if (cachedModels) {
-        console.log("cachedModels", cachedModels);
-        return cachedModels;
-      }
+      // const cachedModels = await this.getCachedModels(tenantId);
+      // if (cachedModels) {
+      //   console.log("cachedModels", cachedModels);
+      //   return cachedModels;
+      // }
 
       // Cache miss - need to create models
       // Use mutex to prevent cache stampede
@@ -83,11 +83,11 @@ class DistributedModelRegistry {
 
       return await mutex.runExclusive(async () => {
         // Double-check cache inside mutex
-        const cachedModelsInMutex = await this.getCachedModels(tenantId);
-        if (cachedModelsInMutex) {
-          console.log("cachedModelsInMutex", cachedModelsInMutex);
-          return cachedModelsInMutex;
-        }
+        // const cachedModelsInMutex = await this.getCachedModels(tenantId);
+        // if (cachedModelsInMutex) {
+        //   console.log("cachedModelsInMutex", cachedModelsInMutex);
+        //   return cachedModelsInMutex;
+        // }
 
         // Create models
         logger.info(`Creating models for tenant: ${tenantId}`);
@@ -175,8 +175,37 @@ class DistributedModelRegistry {
         // Create new model with tenant-specific name
         models[modelName] = connection.model(tenantModelName, schema);
 
-        // Ensure indexes are created
-        await models[modelName].createIndexes();
+        // Ensure indexes are created, handling conflicts gracefully
+        try {
+          await models[modelName].createIndexes();
+        } catch (error) {
+          if (error.code === 85) {
+            // IndexOptionsConflict
+            logger.warn(
+              `Index conflict for model ${tenantModelName}, attempting to resolve...`
+            );
+            // Try to drop conflicting indexes and recreate
+            try {
+              await models[modelName].collection.dropIndex("timestamp_1");
+              await models[modelName].createIndexes();
+              logger.info(
+                `Successfully resolved index conflict for ${tenantModelName}`
+              );
+            } catch (dropError) {
+              logger.error(
+                `Failed to resolve index conflict for ${tenantModelName}:`,
+                dropError
+              );
+              // Continue without failing - the model can still work with existing indexes
+            }
+          } else {
+            logger.error(
+              `Error creating indexes for ${tenantModelName}:`,
+              error
+            );
+            // Continue without failing - the model can still work
+          }
+        }
       }
 
       logger.debug(`Model created: ${tenantModelName}`);
@@ -214,11 +243,12 @@ class DistributedModelRegistry {
    * Get a specific model for a tenant
    * @param {string} tenantId
    * @param {string} modelName
+   * @param {string} schema
    * @returns {Promise<mongoose.Model>}
    */
-  async getModel(tenantId, modelName) {
+  async getModel(tenantId, modelName, schema = null) {
     if (!this.isSchemaRegistered(modelName)) {
-      this.registerSchema(modelName, MasterDataSchema);
+      this.registerSchema(modelName, schema);
     }
     const models = await this.getModels(tenantId);
     console.log("models", models);

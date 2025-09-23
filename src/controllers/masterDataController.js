@@ -1,9 +1,10 @@
 const logger = require("../utils/logger");
-const { createMasterModel } = require("../models/MasterData");
+const { createMasterModel, MasterDataSchema } = require("../models/MasterData");
 const DistributedModelRegistry = require("../services/DistributedModelRegistry");
 const { masterCollections } = require("../models");
 const AuditLog = require("../models/AuditLog");
 const masterDataCache = require("../services/MasterDataCache");
+const distributedModelRegistry = require("../services/DistributedModelRegistry");
 
 /**
  * Get all items from a master collection
@@ -40,7 +41,8 @@ const getAll = async (req, res) => {
     // const tenantConnection = req.tenantConnection;
     const collectionModel = await DistributedModelRegistry.getModel(
       req.tenantId,
-      collectionName
+      collectionName,
+      MasterDataSchema
     );
     console.log("collectionModel", collectionModel);
     // const MasterModel = createMasterModel(collectionName);
@@ -322,9 +324,14 @@ const update = async (req, res) => {
     }
 
     // Get tenant connection
-    const tenantConnection = req.tenantConnection;
-    const MasterModel = createMasterModel(collectionName);
-    const Model = tenantConnection.model(collectionName, MasterModel.schema);
+    // const tenantConnection = req.tenantConnection;
+    // const MasterModel = createMasterModel(collectionName);
+    // const Model = tenantConnection.model(collectionName, MasterModel.schema);
+    const Model = await distributedModelRegistry.getModel(
+      req.tenantId,
+      collectionName,
+      MasterDataSchema
+    );
 
     // Find existing item
     const item = await Model.findById(id);
@@ -340,7 +347,7 @@ const update = async (req, res) => {
     }
 
     // Store original state for audit
-    const before = item.toObject();
+    // const before = item.toObject();
 
     // Check for duplicate code if updating
     if (updates.code && updates.code !== item.code) {

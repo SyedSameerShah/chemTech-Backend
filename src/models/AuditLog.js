@@ -105,13 +105,14 @@ const auditLogSchema = new mongoose.Schema(
 );
 
 // Indexes for efficient querying
-auditLogSchema.index({ timestamp: -1 });
+// Note: Using TTL index for timestamp instead of regular index to avoid conflicts
 auditLogSchema.index({ userId: 1, timestamp: -1 });
 auditLogSchema.index({ resource: 1, resourceId: 1, timestamp: -1 });
 auditLogSchema.index({ tenantId: 1, timestamp: -1 });
 auditLogSchema.index({ action: 1, status: 1, timestamp: -1 });
 
 // TTL index to automatically delete old audit logs after 2 years
+// This also serves as the main timestamp index
 auditLogSchema.index({ timestamp: 1 }, { expireAfterSeconds: 63072000 }); // 2 years
 
 // Static methods
@@ -274,4 +275,4 @@ auditLogSchema.statics.getActivitySummary = async function (
   return await this.aggregate(pipeline);
 };
 
-module.exports = mongoose.model("AuditLog", auditLogSchema, "AuditLog");
+module.exports = auditLogSchema;
