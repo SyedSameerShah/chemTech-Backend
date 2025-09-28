@@ -376,21 +376,21 @@ const update = async (req, res) => {
     await item.save();
 
     // Log audit
-    await AuditLog.logAction({
-      userId: req.user.userId,
-      userEmail: req.user.email,
-      tenantId: req.tenantId,
-      action: "UPDATE",
-      resource: `master_${collectionName}`,
-      resourceId: item._id.toString(),
-      resourceName: item.displayName,
-      before,
-      after: item.toObject(),
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"],
-      requestId: req.requestId,
-      sessionId: req.sessionId,
-    });
+    // await AuditLog.logAction({
+    //   userId: req.user.userId,
+    //   userEmail: req.user.email,
+    //   tenantId: req.tenantId,
+    //   action: "UPDATE",
+    //   resource: `master_${collectionName}`,
+    //   resourceId: item._id.toString(),
+    //   resourceName: item.displayName,
+    //   before,
+    //   after: item.toObject(),
+    //   ipAddress: req.ip,
+    //   userAgent: req.headers["user-agent"],
+    //   requestId: req.requestId,
+    //   sessionId: req.sessionId,
+    // });
 
     // Invalidate Redis cache for this collection
     await masterDataCache.invalidateCollection(req.tenantId, collectionName);

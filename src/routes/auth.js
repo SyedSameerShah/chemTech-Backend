@@ -31,6 +31,8 @@ router.post("/login", async (req, res) => {
       "update:master",
       "approve:input",
       "generate:report",
+      "update:input",
+      "delete:input"
     ],
     sessionId: require("uuid").v4(),
   };

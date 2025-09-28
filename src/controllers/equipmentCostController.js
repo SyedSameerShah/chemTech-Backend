@@ -2,6 +2,8 @@ const logger = require('../utils/logger');
 const Project = require('../models/Project');
 const EquipmentCost = require('../models/EquipmentCost');
 const { createMasterModel } = require('../models/MasterData');
+const masterDataCache = require('../services/MasterDataCache');
+const DistributedModelRegistry = require('../services/DistributedModelRegistry');
 const AuditLog = require('../models/AuditLog');
 const { v4: uuidv4 } = require('uuid');
 
@@ -26,7 +28,7 @@ const getEquipmentCosts = async (req, res) => {
     
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
-    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost.schema);
+    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost);
     
     // Build query
     const query = { isActive: true };
@@ -43,35 +45,55 @@ const getEquipmentCosts = async (req, res) => {
       if (endDate) query.createdOn.$lte = new Date(endDate);
     }
     
-    // Execute query with pagination
-    const skip = (page - 1) * limit;
+    // Parse pagination values
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
     const sort = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
     
-    const [items, total] = await Promise.all([
-      EquipmentCostModel.find(query)
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      EquipmentCostModel.countDocuments(query)
-    ]);
     
-    res.json({
-      success: true,
-      data: {
-        items,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
+      const cacheKey = `cost:${req.query.projectId}:${JSON.stringify(req.query)}`;
+      const cachedData = await masterDataCache.get(req.tenantId,'equipment_cost', cacheKey);
+      if (cachedData) {
+        return res.json({
+          success: true,
+          data: cachedData,
+          meta: {
+            timestamp: new Date().toISOString(),
+            requestId: req.requestId
+          }
+        });
+      } else {
+        const [items, total] = await Promise.all([
+          EquipmentCostModel.find(query)
+            .sort(sort)
+            .skip(skip)
+            .limit(limitNum)
+            .lean(),
+          EquipmentCostModel.countDocuments(query)
+        ]);
+
+        const response = {
+          data: items,
+          pagination: {
+            page: pageNum,
+            limit: limitNum,
+            total,
+            pages: Math.ceil(total / limitNum)
+          }
         }
-      },
-      meta: {
-        timestamp: new Date().toISOString(),
-        requestId: req.requestId
+        
+        await masterDataCache.set(req.tenantId, response, 'equipment_cost', cacheKey);
+
+        res.json({
+          success: true,
+          data: response,
+          meta: {
+            timestamp: new Date().toISOString(),
+            requestId: req.requestId
+          }
+        });
       }
-    });
     
   } catch (error) {
     logger.error('Error fetching equipment costs:', error);
@@ -94,7 +116,7 @@ const getEquipmentCost = async (req, res) => {
     
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
-    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost.schema);
+    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost);
     
     const record = await EquipmentCostModel.findOne({ 
       recordId,
@@ -141,8 +163,8 @@ const createEquipmentCost = async (req, res) => {
     
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
-    const ProjectModel = tenantConnection.model('Project', Project.schema);
-    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost.schema);
+    const ProjectModel = tenantConnection.model('Project', Project);
+    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost);
     const MasterModel = createMasterModel('equipment_categories');
     const EquipmentCategoryModel = tenantConnection.model('equipment_categories', MasterModel.schema);
     
@@ -171,10 +193,31 @@ const createEquipmentCost = async (req, res) => {
         }
       });
     }
+
+    const existingData = await EquipmentCostModel.findOne({
+      projectId: data.projectId,
+      versionId: data.versionId,
+      equipmentName: data.equipmentName,
+      isActive: true
+    });
+
+    if(existingData){
+      return res.status(409).json({
+        success:false,
+        error: {
+          code: 'DUPLICATE_RECORD',
+          message: 'Equipment cost record already exists'
+        }
+      })
+    }
+  
     
-    // Get equipment category for default tax
+    // Get equipment category for default tax. Accept either the category name or code
     const equipmentCategory = await EquipmentCategoryModel.findOne({
-      name: data.equipmentCategory,
+      $or: [
+        { name: data.equipmentCategory },
+        { code: data.equipmentCategory }
+      ],
       isActive: true
     });
     
@@ -209,35 +252,41 @@ const createEquipmentCost = async (req, res) => {
       updatedOn: new Date()
     });
     
+    //1. perform all db write operation
     await record.save();
-    
+
     // Update project version input status
     const versionIndex = project.versions.findIndex(v => v.versionId === data.versionId);
     project.versions[versionIndex].inputStatus.equipmentCost.isEntered = true;
     project.updatedBy = req.user.userId;
     project.updatedOn = new Date();
-    await project.save();
+    await project.save();//2.the project is now also succesfully saved
     
-    // Log audit
-    await AuditLog.logAction({
-      userId: req.user.userId,
-      userEmail: req.user.email,
-      tenantId: req.tenantId,
-      action: 'CREATE',
-      resource: 'equipment_cost',
-      resourceId: record.recordId,
-      resourceName: record.equipmentName,
-      after: record.toObject(),
-      metadata: {
-        projectId: data.projectId,
-        versionId: data.versionId
-      },
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      requestId: req.requestId,
-      sessionId: req.sessionId
-    });
+    //3.Invalidate cache
+    await masterDataCache.invalidateCollection(req.tenantId, `costs:${data.projectId}`);
     
+    //4. Log audit
+    // await AuditLog.logAction({
+    //   userId: req.user.userId,
+    //   userEmail: req.user.email,
+    //   tenantId: req.tenantId,
+    //   action: 'CREATE',
+    //   resource: 'equipment_cost',
+    //   resourceId: record.recordId,
+    //   resourceName: record.equipmentName,
+    //   after: record.toObject(),
+    //   metadata: {
+    //     projectId: data.projectId,
+    //     versionId: data.versionId
+    //   },
+    //   ipAddress: req.ip,
+    //   userAgent: req.headers['user-agent'],
+    //   requestId: req.requestId,
+    //   sessionId: req.sessionId
+    // });
+    
+
+    //5. Return success response
     res.status(201).json({
       success: true,
       data: record,
@@ -269,8 +318,8 @@ const updateEquipmentCost = async (req, res) => {
     
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
-    const ProjectModel = tenantConnection.model('Project', Project.schema);
-    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost.schema);
+    const ProjectModel = tenantConnection.model('Project', Project);
+    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost);
     const MasterModel = createMasterModel('equipment_categories');
     const EquipmentCategoryModel = tenantConnection.model('equipment_categories', MasterModel.schema);
     
@@ -301,8 +350,12 @@ const updateEquipmentCost = async (req, res) => {
       
       // Get equipment category for tax rate
       const categoryName = updates.equipmentCategory || record.equipmentCategory;
+      // Allow frontend to send either category name or code
       const equipmentCategory = await EquipmentCategoryModel.findOne({
-        name: categoryName,
+        $or: [
+          { name: categoryName },
+          { code: categoryName }
+        ],
         isActive: true
       });
       
@@ -336,23 +389,26 @@ const updateEquipmentCost = async (req, res) => {
     });
     
     await record.save();
+
+    // Invalidate cache
+    await masterDataCache.invalidateCollection(req.tenantId, `costs:${record.projectId}`);
     
-    // Log audit
-    await AuditLog.logAction({
-      userId: req.user.userId,
-      userEmail: req.user.email,
-      tenantId: req.tenantId,
-      action: 'UPDATE',
-      resource: 'equipment_cost',
-      resourceId: record.recordId,
-      resourceName: record.equipmentName,
-      before,
-      after: record.toObject(),
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      requestId: req.requestId,
-      sessionId: req.sessionId
-    });
+    // // Log audit
+    // await AuditLog.logAction({
+    //   userId: req.user.userId,
+    //   userEmail: req.user.email,
+    //   tenantId: req.tenantId,
+    //   action: 'UPDATE',
+    //   resource: 'equipment_cost',
+    //   resourceId: record.recordId,
+    //   resourceName: record.equipmentName,
+    //   before,
+    //   after: record.toObject(),
+    //   ipAddress: req.ip,
+    //   userAgent: req.headers['user-agent'],
+    //   requestId: req.requestId,
+    //   sessionId: req.sessionId
+    // });
     
     res.json({
       success: true,
@@ -384,7 +440,7 @@ const deleteEquipmentCost = async (req, res) => {
     
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
-    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost.schema);
+    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost);
     
     const record = await EquipmentCostModel.findOne({ 
       recordId,
@@ -410,23 +466,26 @@ const deleteEquipmentCost = async (req, res) => {
     record.updatedOn = new Date();
     
     await record.save();
+
+    // Invalidate cache
+    await masterDataCache.invalidateCollection(req.tenantId, `costs:${record.projectId}`);
     
     // Log audit
-    await AuditLog.logAction({
-      userId: req.user.userId,
-      userEmail: req.user.email,
-      tenantId: req.tenantId,
-      action: 'DELETE',
-      resource: 'equipment_cost',
-      resourceId: record.recordId,
-      resourceName: record.equipmentName,
-      before,
-      after: record.toObject(),
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      requestId: req.requestId,
-      sessionId: req.sessionId
-    });
+    // await AuditLog.logAction({
+    //   userId: req.user.userId,
+    //   userEmail: req.user.email,
+    //   tenantId: req.tenantId,
+    //   action: 'DELETE',
+    //   resource: 'equipment_cost',
+    //   resourceId: record.recordId,
+    //   resourceName: record.equipmentName,
+    //   before,
+    //   after: record.toObject(),
+    //   ipAddress: req.ip,
+    //   userAgent: req.headers['user-agent'],
+    //   requestId: req.requestId,
+    //   sessionId: req.sessionId
+    // });
     
     res.json({
       success: true,
@@ -458,8 +517,8 @@ const bulkCreateEquipmentCosts = async (req, res) => {
     
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
-    const ProjectModel = tenantConnection.model('Project', Project.schema);
-    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost.schema);
+    const ProjectModel = tenantConnection.model('Project', Project);
+    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost);
     const MasterModel = createMasterModel('equipment_categories');
     const EquipmentCategoryModel = tenantConnection.model('equipment_categories', MasterModel.schema);
     
@@ -489,13 +548,19 @@ const bulkCreateEquipmentCosts = async (req, res) => {
     
     // Get all unique categories and their tax rates
     const uniqueCategories = [...new Set(items.map(item => item.equipmentCategory))];
+    // Find categories by name OR code to support frontend using codes
     const categories = await EquipmentCategoryModel.find({
-      name: { $in: uniqueCategories },
+      $or: [
+        { name: { $in: uniqueCategories } },
+        { code: { $in: uniqueCategories } }
+      ],
       isActive: true
     }).lean();
-    
+
     const categoryTaxMap = categories.reduce((map, cat) => {
-      map[cat.name] = cat.defaultTax;
+      // map both name and code to the same tax rate so lookups work regardless
+      if (cat.name) map[cat.name] = cat.defaultTax;
+      if (cat.code) map[cat.code] = cat.defaultTax;
       return map;
     }, {});
     
@@ -547,27 +612,30 @@ const bulkCreateEquipmentCosts = async (req, res) => {
     project.updatedBy = req.user.userId;
     project.updatedOn = new Date();
     await project.save();
+
+    // Invalidate cache
+    await masterDataCache.invalidateCollection(req.tenantId, `costs:${projectId}`);
     
-    // Log audit
-    await AuditLog.logAction({
-      userId: req.user.userId,
-      userEmail: req.user.email,
-      tenantId: req.tenantId,
-      action: 'CREATE',
-      resource: 'equipment_cost_bulk',
-      resourceId: `BULK_${uuidv4()}`,
-      resourceName: `Bulk create ${insertedRecords.length} records`,
-      metadata: {
-        projectId,
-        versionId,
-        recordCount: insertedRecords.length,
-        recordIds: insertedRecords.map(r => r.recordId)
-      },
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      requestId: req.requestId,
-      sessionId: req.sessionId
-    });
+    // // Log audit
+    // await AuditLog.logAction({
+    //   userId: req.user.userId,
+    //   userEmail: req.user.email,
+    //   tenantId: req.tenantId,
+    //   action: 'CREATE',
+    //   resource: 'equipment_cost_bulk',
+    //   resourceId: `BULK_${uuidv4()}`,
+    //   resourceName: `Bulk create ${insertedRecords.length} records`,
+    //   metadata: {
+    //     projectId,
+    //     versionId,
+    //     recordCount: insertedRecords.length,
+    //     recordIds: insertedRecords.map(r => r.recordId)
+    //   },
+    //   ipAddress: req.ip,
+    //   userAgent: req.headers['user-agent'],
+    //   requestId: req.requestId,
+    //   sessionId: req.sessionId
+    // });
     
     res.status(201).json({
       success: true,
@@ -602,7 +670,7 @@ const updateEquipmentCostStatus = async (req, res) => {
     
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
-    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost.schema);
+    const EquipmentCostModel = tenantConnection.model('EquipmentCost', EquipmentCost);
     
     // Find all records
     const records = await EquipmentCostModel.find({
@@ -636,25 +704,25 @@ const updateEquipmentCostStatus = async (req, res) => {
     
     await Promise.all(updatePromises);
     
-    // Log audit for each record
-    const auditPromises = records.map(record => 
-      AuditLog.logAction({
-        userId: req.user.userId,
-        userEmail: req.user.email,
-        tenantId: req.tenantId,
-        action: status === 'Approved' ? 'APPROVE' : status === 'Rejected' ? 'REJECT' : 'UPDATE',
-        resource: 'equipment_cost',
-        resourceId: record.recordId,
-        resourceName: record.equipmentName,
-        metadata: { status, reason },
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-        requestId: req.requestId,
-        sessionId: req.sessionId
-      })
-    );
+    // // Log audit for each record
+    // const auditPromises = records.map(record => 
+    //   AuditLog.logAction({
+    //     userId: req.user.userId,
+    //     userEmail: req.user.email,
+    //     tenantId: req.tenantId,
+    //     action: status === 'Approved' ? 'APPROVE' : status === 'Rejected' ? 'REJECT' : 'UPDATE',
+    //     resource: 'equipment_cost',
+    //     resourceId: record.recordId,
+    //     resourceName: record.equipmentName,
+    //     metadata: { status, reason },
+    //     ipAddress: req.ip,
+    //     userAgent: req.headers['user-agent'],
+    //     requestId: req.requestId,
+    //     sessionId: req.sessionId
+    //   })
+    // );
     
-    await Promise.all(auditPromises);
+    // await Promise.all(auditPromises);
     
     res.json({
       success: true,

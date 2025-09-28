@@ -26,7 +26,7 @@ const getAllProjects = async (req, res) => {
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
     const ProjectModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "Project",
       Project
     );
@@ -113,7 +113,7 @@ const getProject = async (req, res) => {
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
     const ProjectModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "Project",
       Project
     );
@@ -337,17 +337,17 @@ const createVersion = async (req, res) => {
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
     const ProjectModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "Project",
       Project
     );
     const EquipmentCostModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "EquipmentCost",
       EquipmentCost
     );
     const AuditLogModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "AuditLog",
       AuditLog
     );
@@ -477,12 +477,12 @@ const updateVersionStatus = async (req, res) => {
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
     const ProjectModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "Project",
       Project
     );
     const AuditLogModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "AuditLog",
       AuditLog
     );
@@ -589,17 +589,17 @@ const getProjectStats = async (req, res) => {
     // Get tenant connection
     const tenantConnection = req.tenantConnection;
     const ProjectModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "Project",
       Project
     );
     const EquipmentCostModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "EquipmentCost",
       EquipmentCost.schema
     );
     const AuditLogModel = await distributedModelRegistry.getModel(
-      tenantConnection.tenantId,
+      req.tenantId,  // Use req.tenantId instead of tenantConnection.tenantId
       "AuditLog",
       AuditLog
     );

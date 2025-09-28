@@ -208,4 +208,4 @@ equipmentCostSchema.virtual('displayCost').get(function() {
   };
 });
 
-module.exports = mongoose.model('EquipmentCost', equipmentCostSchema);
+module.exports = equipmentCostSchema;

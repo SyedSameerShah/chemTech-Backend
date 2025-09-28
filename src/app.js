@@ -14,6 +14,7 @@ const authRoutes = require("./routes/auth");
 const masterRoutes = require("./routes/masters");
 const projectRoutes = require("./routes/projects");
 const inputRoutes = require("./routes/inputs");
+const equipmentCostRoutes = require("./routes/equiment-cost");
 
 // Create Express app
 const app = express();
@@ -79,7 +80,7 @@ app.get("/health", (req, res) => {
 });
 
 // API routes
-
+``
 // Auth routes (no tenant required)
 app.use("/api/v1/auth", authRoutes);
 
@@ -87,6 +88,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/masters", masterRoutes);
 app.use("/api/v1/projects", projectRoutes);
 app.use("/api/v1/inputs", inputRoutes);
+app.use("/api/v1/equipmentCost", equipmentCostRoutes);
 
 // Admin routes
 app.get(
@@ -149,6 +151,15 @@ app.get("/", (req, res) => {
             delete: "DELETE /api/v1/inputs/equipmentCost/:recordId",
             status: "POST /api/v1/inputs/equipmentCost/status",
           },
+        },
+        equipmentCost: {
+          list: "GET /api/v1/equipmentCost",
+          get: "GET /api/v1/equipmentCost/:recordId",
+          create: "POST /api/v1/equipmentCost",
+          bulk: "POST /api/v1/equipmentCost/bulk",
+          update: "PUT /api/v1/equipmentCost/:recordId",
+          delete: "DELETE /api/v1/equipmentCost/:recordId",
+          status: "POST /api/v1/equipmentCost/status",
         },
       },
     },

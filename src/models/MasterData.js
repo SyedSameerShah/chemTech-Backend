@@ -176,6 +176,16 @@ const createMasterModel = (collectionName) => {
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join("");
 
+
+    // <<< --- THE FIX IS HERE --- >>>
+  // First, check if a model with this name already exists.
+  if (mongoose.models[modelName]) {
+    // If it does, return the existing model immediately.
+    return mongoose.models[modelName];
+  }
+  // If we are here, it means the model does NOT exist yet, so we proceed to create it.
+  
+
   // Clone the schema for each collection
   const schema = masterDataSchema.clone();
 

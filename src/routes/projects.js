@@ -7,6 +7,7 @@ const {
   authorize,
   requirePermissions,
 } = require("../middleware/auth");
+const { attachTenantConnection } = require("../middleware/tenant");
 const {
   validateBody,
   validateQuery,
@@ -24,6 +25,7 @@ const { z } = require("zod");
 // Apply authentication and tenant resolution to all routes
 router.use(authenticate);
 router.use(resolveTenant);
+router.use(attachTenantConnection);
 
 // Get all projects
 router.get(

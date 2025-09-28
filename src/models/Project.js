@@ -254,4 +254,9 @@ projectSchema.methods.getActiveVersion = function () {
   return this.versions[this.versions.length - 1];
 };
 
+
+//was already an schema 
 module.exports = projectSchema;
+
+//was casuing an error because of the model name
+// module.exports = mongoose.model('Project', projectSchema);
